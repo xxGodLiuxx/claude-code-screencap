@@ -63,7 +63,6 @@ Full setup details: [docs/SETUP.md](docs/SETUP.md).
 - **ffmpeg**: required only for screen recording (`winget install --id Gyan.FFmpeg`)
 - **Chrome 119+**: for `monitorTypeSurfaces` support in `getDisplayMedia`
 - **(optional) Tailscale**: for multi-device access with free HTTPS cert
-- **(optional) Eye-tracker SDK**: untested with non-Tobii setups; should work, the SKIP_PREFIXES list in `screenshot_mcp.py` is the place to extend
 
 ## How it works
 

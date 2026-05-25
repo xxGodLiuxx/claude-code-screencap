@@ -63,7 +63,6 @@ pythonw launcher\launcher.py
 - **ffmpeg**: 画面録画機能のみ必要 (`winget install --id Gyan.FFmpeg`)
 - **Chrome 119+**: `getDisplayMedia` の `monitorTypeSurfaces` サポート用
 - **(任意) Tailscale**: マルチデバイス access + 無料 HTTPS cert 用
-- **(任意) 視線追跡 SDK**: Tobii 以外未検証、動作するはず。`screenshot_mcp.py` の `SKIP_PREFIXES` リストを拡張すれば他環境も対応可
 
 ## 動作原理
 
