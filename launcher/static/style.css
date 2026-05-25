@@ -1,0 +1,320 @@
+/* claude-code-screencap
+ * Eye-tracker (Tobii) optimized dark mode.
+ * Large buttons (60px+), high contrast, Japanese-readable fonts (Yu Gothic UI / Meiryo UI).
+ */
+
+:root {
+  --bg: #1a1a1a;
+  --panel: #252525;
+  --border: #3d3d3d;
+  --text: #eeeeee;
+  --text-dim: #aaaaaa;
+  --btn-bg: #3a3a3a;
+  --btn-hover: #4a4a4a;
+  --btn-border-hover: #88ddff;
+  --accent: #0066cc;
+  --accent-hover: #0080ff;
+  --success: #00cc66;
+  --error: #cc3333;
+  --warn: #ffaa00;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: "Yu Gothic UI", "Meiryo UI", "Segoe UI", system-ui, sans-serif;
+  font-size: 16px;
+  line-height: 1.6;
+  padding: 20px;
+  min-height: 100vh;
+}
+
+header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 20px;
+}
+
+h1 {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 600;
+}
+
+h2 {
+  margin: 16px 0 12px 0;
+  font-size: 14px;
+  font-weight: 600;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  letter-spacing: 0.5px;
+}
+
+.status-pill {
+  padding: 6px 14px;
+  border-radius: 16px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  font-size: 13px;
+}
+
+main {
+  max-width: 900px;
+  margin: 0 auto;
+}
+
+section {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 18px 20px;
+  margin-bottom: 18px;
+}
+
+.hidden { display: none; }
+
+/* ====== Big buttons (Tobii 最適化) ====== */
+
+.button-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 14px;
+}
+
+.big-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 18px 12px;
+  min-height: 110px;
+  background: var(--btn-bg);
+  border: 2px solid var(--border);
+  border-radius: 10px;
+  color: var(--text);
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 15px;
+  transition: background 0.15s, border-color 0.15s, transform 0.05s;
+}
+
+.big-btn:hover {
+  background: var(--btn-hover);
+  border-color: var(--btn-border-hover);
+}
+
+.big-btn:active {
+  transform: scale(0.97);
+}
+
+.big-btn .icon { font-size: 32px; }
+.big-btn .label { font-size: 15px; font-weight: 500; line-height: 1.3; }
+.big-btn .label small { display: block; font-size: 11px; color: var(--text-dim); margin-top: 4px; }
+
+.small-btn {
+  padding: 8px 16px;
+  background: var(--btn-bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 14px;
+}
+
+.small-btn:hover {
+  background: var(--btn-hover);
+  border-color: var(--btn-border-hover);
+}
+
+.primary-btn {
+  margin-top: 12px;
+  padding: 14px 24px;
+  background: var(--accent);
+  border: none;
+  border-radius: 8px;
+  color: white;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 16px;
+  font-weight: 600;
+  width: 100%;
+}
+
+.primary-btn:hover {
+  background: var(--accent-hover);
+}
+
+.primary-btn:disabled {
+  background: #555;
+  cursor: not-allowed;
+}
+
+/* ====== Chrome tab list ====== */
+
+.tab-list {
+  list-style: none;
+  padding: 0;
+  margin: 12px 0;
+  max-height: 280px;
+  overflow-y: auto;
+}
+
+.tab-list li {
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  margin-bottom: 8px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.tab-list li:hover {
+  background: var(--btn-hover);
+  border-color: var(--btn-border-hover);
+}
+
+.tab-list li.selected {
+  border-color: var(--accent);
+  background: rgba(0, 102, 204, 0.15);
+}
+
+.tab-list li input[type="radio"] {
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+}
+
+.tab-list li .tab-title {
+  font-size: 14px;
+  flex-grow: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tab-list li .tab-url {
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+/* ====== Toggle / Intent ====== */
+
+.toggle-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 0;
+  cursor: pointer;
+  font-size: 15px;
+}
+
+.toggle-row input[type="checkbox"] {
+  width: 22px;
+  height: 22px;
+  flex-shrink: 0;
+}
+
+.big-toggle {
+  font-size: 17px;
+}
+
+.big-toggle input[type="checkbox"] {
+  width: 28px;
+  height: 28px;
+}
+
+.intent-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 10px;
+}
+
+.intent-row span {
+  font-size: 14px;
+  color: var(--text-dim);
+  flex-shrink: 0;
+}
+
+.intent-row input[type="text"] {
+  flex-grow: 1;
+  padding: 12px 14px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  font-family: inherit;
+  font-size: 15px;
+}
+
+.intent-row input[type="text"]:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+/* ====== Thumbnails ====== */
+
+.thumb-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+  margin-top: 10px;
+}
+
+.thumb {
+  border: 2px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+  cursor: pointer;
+  transition: border-color 0.15s, transform 0.05s;
+  background: var(--bg);
+  padding: 6px;
+}
+
+.thumb:hover {
+  border-color: var(--btn-border-hover);
+}
+
+.thumb img {
+  width: 100%;
+  height: 110px;
+  object-fit: contain;
+  background: #000;
+  border-radius: 4px;
+}
+
+.thumb .meta {
+  font-size: 11px;
+  color: var(--text-dim);
+  padding: 6px 4px 2px;
+  text-align: center;
+  word-break: break-all;
+}
+
+/* ====== Status ====== */
+
+#last-status {
+  font-family: "Consolas", "Courier New", monospace;
+  font-size: 13px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  padding: 12px 14px;
+  border-radius: 6px;
+  white-space: pre-wrap;
+  color: var(--text-dim);
+}
+
+#last-status.success { color: var(--success); }
+#last-status.error { color: var(--error); }
+#last-status.warn { color: var(--warn); }

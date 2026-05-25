@@ -1,0 +1,46 @@
+# Secrets / TLS certificates
+*.crt
+*.key
+*.pem
+.env
+.env.local
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+
+# Virtual environments
+venv/
+.venv/
+env/
+
+# Runtime logs
+*.log
+launcher/launcher.log
+launcher/chrome_cdp.log
+launcher/chrome_cdp_watchdog.log
+
+# Captured screenshots and recordings (per-user data)
+inbox/
+recordings/
+
+# IDE / editors
+.vscode/
+.idea/
+*.swp
+*~
+
+# OS
+Thumbs.db
+desktop.ini
+.DS_Store
+
+# Build artifacts
+dist/
+build/
