@@ -166,7 +166,7 @@
     }
   };
 
-  // ====== Browser-native capture (getDisplayMedia, claude.ai と同経路) ======
+  // ====== Browser-native capture (standard getDisplayMedia API) ======
 
   const _captureViaGetDisplayMedia = async (videoConstraints, statusLabel) => {
     if (!navigator.mediaDevices || !navigator.mediaDevices.getDisplayMedia) {
@@ -199,9 +199,9 @@
     setStatus("OS picker を起動 (Chrome タブ / ウィンドウ / 画面全体 から選択)...", "warn");
     let stream;
     try {
-      // No displaySurface constraint → 3-mode picker (Chrome tab + window + full screen),
-      // same as claude.ai's screen-share dialog. Chrome tabs can be captured without CDP.
-      // monitorTypeSurfaces: "include" explicitly enables the "full screen" tab.
+      // No displaySurface constraint → 3-mode picker (Chrome tab + window + full screen).
+      // Chrome tabs can be captured without CDP. monitorTypeSurfaces: "include"
+      // explicitly enables the "full screen" tab.
       stream = await navigator.mediaDevices.getDisplayMedia({
         video: true,
         audio: false,

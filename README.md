@@ -1,12 +1,14 @@
 # claude-code-screencap
 
-Multi-device screenshot and screen-recording launcher for [Claude Code](https://www.anthropic.com/claude-code) CLI. Captures via browser-native APIs, transcodes via `ffmpeg`, and injects images directly into the CC CLI input via `SendKeys` — so questions like *"what's on this screen?"* become a 2-click flow.
+Independent third-party screenshot and screen-recording launcher for the [Claude Code](https://www.anthropic.com/claude-code) CLI. Captures via standard browser APIs (`getDisplayMedia`), transcodes via `ffmpeg`, and pastes images into the CC CLI input via `SendKeys` — so questions like *"what's on this screen?"* become a 2-click flow.
+
+> Not affiliated with, endorsed by, or sponsored by Anthropic. See [Trademarks](#trademarks).
 
 > 🇯🇵 日本語版: [README.ja.md](README.ja.md)
 
 ## Highlights
 
-- 🎯 **Browser-native picker** — `getDisplayMedia` 3-mode (Chrome tab / window / full screen), same as claude.ai's screen-share dialog. No CDP, no kernel hooks.
+- 🎯 **Browser-native picker** — standard `getDisplayMedia` API in 3-mode (Chrome tab / window / full screen). No CDP, no kernel hooks.
 - 🪟 **PrintWindow capture** — overlay-free window capture (Win32 `PrintWindow + PW_RENDERFULLCONTENT`). Eye-tracker cursors, IME overlays, accessibility helpers are excluded. UWP apps fall back to `mss`.
 - 🎬 **Screen recording → CC CLI** — `MediaRecorder` → WebM → `ffmpeg` 1 fps frame extraction → all frames injected into CC CLI as `@<path1> @<path2> ... <intent>` for subtitle OCR / timeline analysis.
 - 🌐 **Multi-device** — capture on a tablet, process on your workstation. Works over private VPN (Tailscale tested). HTTPS via `tailscale cert` for cross-device `getDisplayMedia`.
@@ -19,7 +21,7 @@ This tool was built to support eye-tracker (Tobii) users interacting with Claude
 
 - **Minimize clicks** per capture — screenshots in 2 clicks, recordings in 3.
 - **Cross-device usability** — capture on a tablet while AI work continues on a workstation.
-- **Direct integration** with Claude Code's `@<path>` image attach syntax (no manual copy / drop).
+- **Targets Claude Code's `@<path>` image attach convention** (no manual copy / drop into the chat field).
 - **Privacy-preserving** — all data stays on your own machines / private VPN.
 
 It's a personal project, open-sourced for the eye-tracker / accessibility community and Claude Code power users.
@@ -113,6 +115,15 @@ Full setup details: [docs/SETUP.md](docs/SETUP.md).
 ## License
 
 [MIT](LICENSE). © 2026 xxGodLiuxx.
+
+## Trademarks
+
+- **Claude** and **Claude Code** are trademarks of [Anthropic, PBC](https://www.anthropic.com/). This project is independent and is **not affiliated with, endorsed by, or sponsored by Anthropic**. References to Claude Code describe interoperability only.
+- **Tobii** is a trademark of [Tobii AB](https://www.tobii.com/). References describe compatibility with the maintainer's setup; no endorsement implied.
+- **Google Chrome** is a trademark of Google LLC. **Microsoft Windows** is a trademark of Microsoft Corporation. **Tailscale** is a trademark of Tailscale Inc.
+- **WezTerm** and **ffmpeg** are open-source projects; trademarks belong to their respective holders.
+
+All other trademarks are the property of their respective owners.
 
 ## Acknowledgements
 

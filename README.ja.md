@@ -1,12 +1,14 @@
 # claude-code-screencap
 
-[Claude Code](https://www.anthropic.com/claude-code) CLI 向けマルチデバイス対応スクリーンショット + 録画ランチャー。Browser-native API でキャプチャ、`ffmpeg` で frame 化、`SendKeys` で CC CLI 入力欄に直接投入 — 「この画面何?」が **2 click** で完結する flow を提供します。
+[Claude Code](https://www.anthropic.com/claude-code) CLI 向けの **独立サードパーティ**マルチデバイス対応スクリーンショット + 録画ランチャー。標準 browser API (`getDisplayMedia`) でキャプチャ、`ffmpeg` で frame 化、`SendKeys` で CC CLI 入力欄に paste — 「この画面何?」が **2 click** で完結する flow を提供します。
+
+> Anthropic 公式プロジェクトではありません、提携・推奨・スポンサー関係なし。[商標](#商標) 参照。
 
 > 🇺🇸 English: [README.md](README.md)
 
 ## 主要機能
 
-- 🎯 **Browser-native picker** — `getDisplayMedia` 3 mode (Chrome タブ / ウィンドウ / 画面全体)。claude.ai の画面共有 dialog と同経路。CDP 不要、kernel hook 不要。
+- 🎯 **Browser-native picker** — 標準 `getDisplayMedia` API の 3 mode (Chrome タブ / ウィンドウ / 画面全体)。CDP 不要、kernel hook 不要。
 - 🪟 **PrintWindow キャプチャ** — overlay 排除ウィンドウキャプチャ (Win32 `PrintWindow + PW_RENDERFULLCONTENT`)。視線追跡カーソル、IME overlay、アクセシビリティ補助は **除外**。UWP App は `mss` にフォールバック。
 - 🎬 **画面録画 → CC CLI 投入** — `MediaRecorder` → WebM → `ffmpeg` 1 fps frame 抽出 → 全 frame を `@<path1> @<path2> ... <intent>` で CC CLI 投入。字幕 OCR や timeline 解析に。
 - 🌐 **マルチデバイス対応** — タブレットで撮影、ワークステーションで処理。private VPN (Tailscale で動作確認済) 経由。`tailscale cert` で全 device の `getDisplayMedia` を HTTPS secure context に。
@@ -19,7 +21,7 @@
 
 - **キャプチャあたりの click 数最小化** — screenshot 2 click、録画 3 click
 - **クロスデバイス使用性** — タブレットでキャプチャしながら、ワークステーションで AI 作業継続
-- Claude Code の `@<path>` image attach 構文に **直接統合** (手動 copy / drop なし)
+- Claude Code の `@<path>` image attach 規約を **targets** (chat field への手動 drag-and-drop 不要)
 - **プライバシー保護** — 全データは自分のマシン / 私的 VPN 内に留まる
 
 個人プロジェクトですが、視線追跡 / アクセシビリティコミュニティと Claude Code パワーユーザー向けに OSS 公開しています。
@@ -112,6 +114,15 @@ pythonw launcher\launcher.py
 ## ライセンス
 
 [MIT](LICENSE). © 2026 xxGodLiuxx.
+
+## 商標
+
+- **Claude** および **Claude Code** は [Anthropic, PBC](https://www.anthropic.com/) の商標です。本プロジェクトは独立で、**Anthropic と提携・推奨・スポンサー関係はありません**。Claude Code への言及は相互運用性 (interoperability) の説明のみです。
+- **Tobii** は [Tobii AB](https://www.tobii.com/) の商標です。メンテナの環境と互換性があることを記述するためのもので、推奨を示すものではありません。
+- **Google Chrome** は Google LLC の商標、**Microsoft Windows** は Microsoft Corporation の商標、**Tailscale** は Tailscale Inc. の商標です。
+- **WezTerm** および **ffmpeg** は open source プロジェクト、商標は各保有者に帰属します。
+
+その他の商標はすべて各保有者に帰属します。
 
 ## 謝辞
 
