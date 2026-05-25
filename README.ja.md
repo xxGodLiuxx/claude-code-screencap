@@ -75,8 +75,11 @@ pythonw launcher\launcher.py
 │  getDisplayMedia        │ ──HTTPS─►  Flask が PNG/WebM 受信      │
 │  → PNG blob or WebM     │         │  → inbox/ or recordings/<ts>/│
 │                         │         │  → ffmpeg fps=1 で frame 抽出│
-│                         │         │  → wezterm cli activate-tab  │
-│                         │         │  → pyperclip + Ctrl+V + Enter│
+│                         │         │  → wezterm cli list で       │
+│                         │         │     CC CLI pane を project   │
+│                         │         │     ベースで検出             │
+│                         │         │  → wezterm cli send-text     │
+│                         │         │     --pane-id N (+ Enter)    │
 └─────────────────────────┘         └──────────────────────────────┘
                                                   │
                                                   ▼
@@ -128,9 +131,9 @@ pythonw launcher\launcher.py
 
 利用しているOSS:
 - [Flask](https://flask.palletsprojects.com/) — backend
-- [pyautogui](https://pyautogui.readthedocs.io/) + [pyperclip](https://pyperclip.readthedocs.io/) + [pygetwindow](https://pygetwindow.readthedocs.io/) — SendKeys
+- [pygetwindow](https://pygetwindow.readthedocs.io/) — ウィンドウ列挙 (pyautogui + pyperclip は防御的 fallback として残置、v9 の inject 経路は `wezterm cli send-text`)
 - [pywin32](https://github.com/mhammond/pywin32) — PrintWindow API
 - [mss](https://python-mss.readthedocs.io/) — フォールバック画面キャプチャ
-- [WezTerm](https://wezterm.org/) — `cli list / activate-tab` サポートのターミナル
+- [WezTerm](https://wezterm.org/) — `cli list / send-text` サポートのターミナル (v9 の inject 先)
 - [ffmpeg](https://ffmpeg.org/) — frame 抽出
 - [Anthropic Claude Code](https://www.anthropic.com/claude-code) — キャプチャを受信する AI エージェント

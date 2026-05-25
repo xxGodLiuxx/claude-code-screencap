@@ -28,6 +28,9 @@
     authSave: $("#auth-save"),
     authClear: $("#auth-clear"),
     authHint: $("#auth-hint"),
+    captureDelay: $("#capture-delay"),
+    countdownOverlay: $("#countdown-overlay"),
+    countdownNumber: $("#countdown-number"),
   };
 
   let selectedTabId = null;
@@ -68,6 +71,34 @@
       setStatus("⚠️ 認証失敗、token を確認してください。", "error");
     }
     return r;
+  };
+
+  // ====== Timer helpers (delayed capture) ======
+
+  const getCaptureDelay = () => {
+    const v = parseInt(ui.captureDelay?.value || "0", 10);
+    return Number.isFinite(v) && v >= 0 ? v : 0;
+  };
+
+  // Show a large countdown overlay, decrementing once per second. The
+  // getDisplayMedia call must run synchronously off a user gesture, but the
+  // grabFrame / mediaRecorder.start that consumes its stream is gesture-free,
+  // so we insert the countdown after the stream is acquired. The overlay is
+  // hidden + a short repaint wait happens BEFORE the actual capture so the
+  // overlay itself does not end up in the captured frame when the user
+  // shares a fullscreen view.
+  const runCountdown = async (seconds) => {
+    if (!ui.countdownOverlay || seconds <= 0) return;
+    ui.countdownOverlay.classList.remove("hidden");
+    try {
+      for (let i = seconds; i > 0; i--) {
+        ui.countdownNumber.textContent = String(i);
+        await new Promise((r) => setTimeout(r, 1000));
+      }
+    } finally {
+      ui.countdownOverlay.classList.add("hidden");
+      await new Promise((r) => setTimeout(r, 120));
+    }
   };
 
   // ====== Status helpers ======
@@ -158,7 +189,22 @@
         setStatus(`ERROR: ${j.error}`, "error");
         return null;
       }
-      setStatus(`OK: ${j.path}${ui.autoSend.checked ? " (CC CLI 投入済)" : ""}`, "success");
+      // Read backend's send_result so the status reflects the actual paste
+      // outcome, not just "auto-send was requested" (autoSend=true alone is
+      // not enough — the underlying SendKeys may have been rejected if no CC
+      // CLI pane was found).
+      let suffix = "";
+      let level = "success";
+      if (ui.autoSend.checked) {
+        if (j.send_result && j.send_result.status === "sent") {
+          const submitted = j.send_result.auto_submit ? " + Enter 送信" : "";
+          suffix = ` (CC CLI 投入済${submitted})`;
+        } else if (j.send_result) {
+          suffix = ` (送信失敗: ${j.send_result.reason || "?"})`;
+          level = "warn";
+        }
+      }
+      setStatus(`OK: ${j.path}${suffix}`, level);
       return j.path;
     } catch (e) {
       setStatus(`fetch failed: ${e.message}`, "error");
@@ -219,6 +265,11 @@
     }
     try {
       const track = stream.getVideoTracks()[0];
+      const delay = getCaptureDelay();
+      if (delay > 0) {
+        setStatus(`${delay} 秒後に撮影...`, "warn");
+        await runCountdown(delay);
+      }
       let bitmap;
       if (window.ImageCapture) {
         bitmap = await new ImageCapture(track).grabFrame();
@@ -278,6 +329,11 @@
   let recordingChunks = [];
   let recordingStartTime = 0;
   let recordingTimerInterval = null;
+  // Set if the user clicks stop while the countdown is still running (before
+  // mediaRecorder.start() fires). startRecording checks this flag after the
+  // countdown completes and aborts cleanly instead of starting an unwanted
+  // recording session.
+  let cancelPendingStart = false;
 
   const updateRecordBtnLabel = (recording) => {
     const btn = document.getElementById("record-btn");
@@ -291,6 +347,13 @@
       iconSpan.textContent = "🎬";
       labelSpan.innerHTML = "録画<br><small>(start/stop)</small>";
     }
+    // Disable the other capture buttons while recording so the user can't
+    // accidentally fire a still capture mid-recording.
+    document.body.classList.toggle("is-recording", recording);
+    ["browser_native", "active_window", "latest_show"].forEach((action) => {
+      const b = document.querySelector(`[data-action="${action}"]`);
+      if (b) b.disabled = recording;
+    });
   };
 
   const startRecording = async () => {
@@ -298,6 +361,7 @@
       setStatus("既に録画中", "warn");
       return;
     }
+    cancelPendingStart = false;
     setStatus("OS picker 起動 (録画対象選択: タブ/窓/画面)...", "warn");
     try {
       recordingStream = await navigator.mediaDevices.getDisplayMedia({
@@ -332,24 +396,61 @@
       if (e.data && e.data.size > 0) recordingChunks.push(e.data);
     };
     mediaRecorder.onstop = async () => {
-      const blob = new Blob(recordingChunks, { type: mimeType });
-      const sizeKB = Math.round(blob.size / 1024);
-      setStatus(`録画停止 (${sizeKB} KB)、upload + ffmpeg 抽出中...`, "warn");
-      await uploadRecording(blob);
-      if (recordingStream) {
-        recordingStream.getTracks().forEach((t) => t.stop());
-        recordingStream = null;
-      }
-      mediaRecorder = null;
-      recordingChunks = [];
+      // Reset UI state IMMEDIATELY (button label / timer / stream) so the
+      // user gets fast feedback. The upload + ffmpeg step happens after.
       if (recordingTimerInterval) {
         clearInterval(recordingTimerInterval);
         recordingTimerInterval = null;
       }
       updateRecordBtnLabel(false);
+      if (recordingStream) {
+        recordingStream.getTracks().forEach((t) => t.stop());
+        recordingStream = null;
+      }
+
+      const blob = new Blob(recordingChunks, { type: mimeType });
+      const sizeKB = Math.round(blob.size / 1024);
+      // ffmpeg crashes on a 0-byte / tiny WebM. Reject it client-side and
+      // surface a friendly message; the user just needs to record for >1 sec.
+      if (blob.size < 1024) {
+        setStatus(`録画 ${blob.size} bytes と短すぎる、upload 中止 (1 秒以上録画してから停止してください)`, "error");
+        mediaRecorder = null;
+        recordingChunks = [];
+        return;
+      }
+      setStatus(`録画停止 (${sizeKB} KB)、upload + ffmpeg 抽出中...`, "warn");
+      await uploadRecording(blob);
+      mediaRecorder = null;
+      recordingChunks = [];
     };
 
-    mediaRecorder.start();
+    // Optional delay (lets the user prepare the target window while the
+    // sharing UI is already locked in). The label flips to "録画停止"
+    // pre-emptively so the cancel path is available during the countdown.
+    const delay = getCaptureDelay();
+    if (delay > 0) {
+      setStatus(`${delay} 秒後に録画開始...`, "warn");
+      updateRecordBtnLabel(true);
+      await runCountdown(delay);
+      if (cancelPendingStart) {
+        setStatus("録画キャンセル (countdown 中に停止)", "warn");
+        if (recordingStream) {
+          recordingStream.getTracks().forEach((t) => t.stop());
+          recordingStream = null;
+        }
+        mediaRecorder = null;
+        recordingChunks = [];
+        cancelPendingStart = false;
+        updateRecordBtnLabel(false);
+        return;
+      }
+    }
+
+    // timeslice=1000ms: flush data every second. Without a timeslice argument
+    // MediaRecorder buffers everything until stop(), and a quick start→stop
+    // (< 100 ms) yields a 0-byte blob — the encoder hasn't produced output
+    // yet — which then crashes ffmpeg.
+    mediaRecorder.start(1000);
     recordingStartTime = Date.now();
     updateRecordBtnLabel(true);
     setStatus("録画中 ● REC 00:00", "warn");
@@ -362,8 +463,14 @@
   };
 
   const stopRecording = () => {
-    if (mediaRecorder && mediaRecorder.state === "recording") {
+    if (!mediaRecorder) return;
+    if (mediaRecorder.state === "recording") {
       mediaRecorder.stop();
+    } else {
+      // mediaRecorder exists but start() hasn't fired yet (we're in the
+      // countdown window). Setting this flag makes startRecording abort
+      // when the countdown finishes, instead of starting an unwanted record.
+      cancelPendingStart = true;
     }
   };
 

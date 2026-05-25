@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Claude Code Screencap</title>
-  <link rel="stylesheet" href="/static/style.css">
+  <link rel="stylesheet" href="/static/style.css?v=20260525-26">
 </head>
 <body>
   <header>
@@ -59,6 +59,19 @@
       <div id="recent-list" class="thumb-grid"></div>
     </section>
 
+    <section class="timer-config">
+      <h2>⏱ Timer</h2>
+      <label class="intent-row">
+        <span>遅延撮影:</span>
+        <select id="capture-delay" style="flex:1; padding:6px;">
+          <option value="0">即時</option>
+          <option value="3">3 秒後</option>
+          <option value="5">5 秒後</option>
+          <option value="10">10 秒後</option>
+        </select>
+      </label>
+    </section>
+
     <section class="cc-control">
       <h2>CC CLI 連携</h2>
       <label class="toggle-row big-toggle">
@@ -88,6 +101,10 @@
     </section>
   </main>
 
-  <script src="/static/app.js?v=20260525-16"></script>
+  <div id="countdown-overlay" class="hidden">
+    <div id="countdown-number">3</div>
+  </div>
+
+  <script src="/static/app.js?v=20260525-26"></script>
 </body>
 </html>

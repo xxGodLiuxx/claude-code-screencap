@@ -143,8 +143,7 @@ def chrome_cdp_status():
 def cap_full():
     try:
         path = smcp.capture_full_screen()
-        _auto_send_if_requested(path)
-        return jsonify({"path": path})
+        return jsonify(_capture_response(path))
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -154,8 +153,7 @@ def cap_full():
 def cap_active():
     try:
         path = smcp.capture_active_window()
-        _auto_send_if_requested(path)
-        return jsonify({"path": path})
+        return jsonify(_capture_response(path))
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -169,8 +167,7 @@ def cap_window():
         return jsonify({"error": "title required"}), 400
     try:
         path = smcp.capture_window_by_title(title)
-        _auto_send_if_requested(path)
-        return jsonify({"path": path})
+        return jsonify(_capture_response(path))
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -185,8 +182,7 @@ def cap_chrome_tab():
         return jsonify({"error": "target required"}), 400
     try:
         path = smcp.capture_chrome_tab(target, full_page=full_page)
-        _auto_send_if_requested(path)
-        return jsonify({"path": path})
+        return jsonify(_capture_response(path))
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -317,8 +313,13 @@ def cap_record_upload():
             creationflags=subprocess.CREATE_NO_WINDOW,
         )
         if r.returncode != 0:
-            err = (r.stderr or b"").decode("utf-8", errors="replace").strip()[:500]
-            return jsonify({"error": f"ffmpeg failed: {err}"}), 500
+            # ffmpeg writes its version banner first on stderr (~500 chars), so
+            # slicing the head buries the actual error. Take the tail instead
+            # and log the full stderr for deeper triage.
+            err_full = (r.stderr or b"").decode("utf-8", errors="replace").strip()
+            err_tail = err_full[-800:] if len(err_full) > 800 else err_full
+            sys.stderr.write(f"[launcher] ffmpeg full stderr ({len(err_full)} chars):\n{err_full}\n")
+            return jsonify({"error": f"ffmpeg failed: ...{err_tail}"}), 500
     except subprocess.TimeoutExpired:
         return jsonify({"error": "ffmpeg timeout (120s)"}), 500
     except FileNotFoundError:
@@ -372,12 +373,22 @@ def cc_send():
 @app.route("/api/cc/status", methods=["GET"])
 @require_token
 def cc_status():
-    # Readiness = whether a WezTerm window matching the CC CLI pattern is visible.
-    wins = _find_cc_cli_window()
-    return jsonify({
-        "ready": wins is not None,
-        "window_title": wins.title if wins else None,
-    })
+    """Readiness = whether wezterm cli list shows a tab that scores as CC CLI.
+
+    Earlier versions inspected only the OS window title, which is the *active*
+    tab's title. That meant when the active tab was a shell (e.g. pwsh), the
+    UI showed "connected ([4/4] pwsh.exe)" even though paste would actually
+    target the real CC CLI pane via wezterm cli. v9 unifies the two paths.
+    """
+    pane = _find_cc_cli_pane()
+    if pane:
+        return jsonify({
+            "ready": True,
+            "window_title": pane.get("title") or "",
+            "tab_id": pane.get("tab_id"),
+            "pane_id": pane.get("pane_id"),
+        })
+    return jsonify({"ready": False, "window_title": None})
 
 
 WEZTERM_CLI = os.environ.get("WEZTERM_CLI", r"C:\Program Files\WezTerm\wezterm.exe")
@@ -435,10 +446,146 @@ def cc_tabs():
         return jsonify({"error": str(e)}), 500
 
 
-def _activate_wezterm_tab(tab_id: int) -> bool:
-    """Bring a specific WezTerm tab to the foreground before SendKeys injection.
+def _wezterm_list_panes() -> "list | None":
+    """Shared helper: return parsed JSON output of `wezterm cli list`."""
+    try:
+        r = subprocess.run(
+            [WEZTERM_CLI, "cli", "list", "--format", "json"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=5,
+            creationflags=subprocess.CREATE_NO_WINDOW,
+        )
+        if r.returncode != 0:
+            return None
+        stdout = (r.stdout or b"").decode("utf-8", errors="replace")
+        if not stdout.strip():
+            return None
+        return json.loads(stdout)
+    except Exception as e:
+        sys.stderr.write(f"[launcher] wezterm cli list failed: {e}\n")
+        return None
 
-    Uses CREATE_NO_WINDOW for stable behavior under pythonw.
+
+def _find_cc_cli_pane() -> "dict | None":
+    """Return the most likely CC CLI pane as {tab_id, pane_id, title}, or None.
+
+    Inspecting only the OS window title would miss CC CLI tabs that are not
+    currently active (WezTerm has one OS window with multiple internal tabs;
+    the window title reflects only the active tab). Querying `wezterm cli list`
+    surfaces every tab regardless of active state. We score each tab by:
+      +10 if cwd basename matches LAUNCHER_PREFERRED_PROJECT
+      +5 if the title contains a CC CLI spinner / status glyph
+      +2 if the title matches the [N/M] pattern
+    Shell titles (pwsh.exe / powershell / cmd.exe) are filtered out.
+    """
+    tabs = _wezterm_list_panes()
+    if tabs is None:
+        return None
+    from urllib.parse import urlparse, unquote
+
+    seen = set()
+    scored = []  # (score, tab_id, pane_id, title)
+    for t in tabs:
+        pane_id = t.get("pane_id")
+        tab_id = t.get("tab_id")
+        if pane_id is None or pane_id in seen:
+            continue
+        seen.add(pane_id)
+        title_orig = t.get("title") or ""
+        title_lc = title_orig.lower()
+        if any(ind in title_lc for ind in _SHELL_TITLE_INDICATORS):
+            continue
+        cwd_url = t.get("cwd", "") or ""
+        project = ""
+        if cwd_url.startswith("file:///"):
+            p = unquote(urlparse(cwd_url).path).lstrip("/").rstrip("/")
+            project = p.replace("\\", "/").rstrip("/").split("/")[-1]
+        score = 0
+        if _PREFERRED_PROJECT and project == _PREFERRED_PROJECT:
+            score += 10
+        if any(c in title_orig for c in "⠂⠁⠉⠙⠹⠸⠼⠴⠦⠧⠇⠏✳"):
+            score += 5
+        if _CC_CLI_TAB_PATTERN.match(title_orig):
+            score += 2
+        scored.append((score, tab_id, pane_id, title_orig))
+    if not scored:
+        return None
+    scored.sort(reverse=True)
+    if scored[0][0] > 0:
+        return {
+            "tab_id": scored[0][1],
+            "pane_id": scored[0][2],
+            "title": scored[0][3],
+        }
+    return None
+
+
+def _find_pane_for_tab(tab_id: int) -> "dict | None":
+    """Return the first pane of the given tab_id (for explicit dropdown selection)."""
+    tabs = _wezterm_list_panes()
+    if tabs is None:
+        return None
+    for t in tabs:
+        if t.get("tab_id") == tab_id:
+            return {
+                "tab_id": tab_id,
+                "pane_id": t.get("pane_id"),
+                "title": t.get("title") or "",
+            }
+    return None
+
+
+def _wezterm_send_to_pane(pane_id: int, text: str, submit: bool = False) -> dict:
+    """Inject `text` into a specific WezTerm pane via `wezterm cli send-text`.
+
+    This replaces the older clipboard + SetForegroundWindow + Ctrl+V flow used
+    by Phase 1 / 1.5. Targeting a pane_id directly means the injection no
+    longer depends on which tab is currently active, does not steal the OS
+    focus, and avoids the ALT-key menubar side effect on whichever window
+    happened to be foregrounded.
+    """
+    try:
+        r1 = subprocess.run(
+            [WEZTERM_CLI, "cli", "send-text", "--pane-id", str(pane_id)],
+            input=text.encode("utf-8"),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=5,
+            creationflags=subprocess.CREATE_NO_WINDOW,
+        )
+        if r1.returncode != 0:
+            err = (r1.stderr or b"").decode("utf-8", errors="replace").strip()
+            return {"status": "error", "reason": f"send-text failed: {err}"}
+        if submit:
+            # Send Enter as a real keystroke (outside the bracketed paste) so the
+            # CC CLI input box treats it as submit rather than a newline within
+            # the pasted content.
+            r2 = subprocess.run(
+                [WEZTERM_CLI, "cli", "send-text", "--pane-id", str(pane_id), "--no-paste"],
+                input=b"\r",
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                timeout=3,
+                creationflags=subprocess.CREATE_NO_WINDOW,
+            )
+            if r2.returncode != 0:
+                err = (r2.stderr or b"").decode("utf-8", errors="replace").strip()
+                return {"status": "error", "reason": f"Enter send failed: {err}"}
+        return {"status": "sent", "method": "wezterm-cli send-text", "auto_submit": submit}
+    except subprocess.TimeoutExpired:
+        return {"status": "error", "reason": "wezterm send-text timeout (5s)"}
+    except FileNotFoundError:
+        return {"status": "error", "reason": "wezterm cli not found in PATH"}
+    except Exception as e:
+        return {"status": "error", "reason": f"send-text exception: {e}"}
+
+
+def _activate_wezterm_tab(tab_id: int) -> bool:
+    """Bring a specific WezTerm tab to the foreground.
+
+    Used by `/api/cc/tabs` thumbnails; the SendKeys path no longer needs this
+    since v9 (wezterm cli send-text targets pane_id directly).
     """
     try:
         subprocess.run(
@@ -554,6 +701,13 @@ import re as _re
 _WEZTERM_TAB_PATTERN = _re.compile(r'^\[\d+(?:/\d+)?\]')      # any WezTerm tab (status check)
 _CC_CLI_TAB_PATTERN = _re.compile(r'^\[\d+/\d+\]')             # CC CLI tab only (SendKeys)
 
+# Shell indicators to exclude in strict mode: a WezTerm window with an active
+# shell tab matches the [N/M] pattern (e.g. "[4/4] pwsh.exe") but is NOT a CC
+# CLI session, so injecting paste into it sends `@file` syntax to a shell that
+# can't parse it. v9 (2026-05-25) switched to wezterm cli send-text which makes
+# this filter mostly moot, but it remains as a defensive layer.
+_SHELL_TITLE_INDICATORS = ("pwsh.exe", "powershell.exe", "powershell ", "cmd.exe")
+
 # Substring priority: pick the CC CLI tab whose title contains this string
 # first (typically the active project name). Empty = pick the first match.
 _PREFERRED_PROJECT = os.environ.get("LAUNCHER_PREFERRED_PROJECT", "")
@@ -563,12 +717,23 @@ def _find_cc_cli_window(strict: bool = False):
     """Find a WezTerm window by title regex.
 
     Args:
-        strict: True restricts to CC CLI tabs ([N/M] pattern), excluding shells.
-                False returns any WezTerm tab (used for readiness check).
+        strict: True restricts to CC CLI tabs ([N/M] pattern, shell titles
+                excluded). False returns any WezTerm tab (readiness check).
+
+    NOTE: As of v9 the SendKeys path uses `wezterm cli send-text --pane-id`
+    (see `_find_cc_cli_pane`) which targets panes directly and does not depend
+    on which tab is currently active in the OS window. This function is kept
+    only for legacy readiness checks; the v9 cc_status route uses the pane
+    finder instead.
     """
     pattern = _CC_CLI_TAB_PATTERN if strict else _WEZTERM_TAB_PATTERN
     all_wins = gw.getAllWindows()
     matches = [w for w in all_wins if w.title and pattern.match(w.title)]
+    if strict:
+        matches = [
+            w for w in matches
+            if not any(ind in w.title.lower() for ind in _SHELL_TITLE_INDICATORS)
+        ]
     if not matches:
         return None
     if _PREFERRED_PROJECT:
@@ -579,25 +744,53 @@ def _find_cc_cli_window(strict: bool = False):
 
 
 def _force_foreground(hwnd: int) -> bool:
-    """Bring a window to the foreground reliably.
+    """Bring a window to the foreground via AttachThreadInput.
 
-    Windows' SetForegroundWindow has restrictions (a process that doesn't own
-    the foreground input can't grab it). The well-known workaround is to press
-    ALT first, which transiently relaxes the restriction.
+    Windows' SetForegroundWindow has restrictions: a process that doesn't own
+    the foreground input cannot grab it. The earlier workaround pressed ALT to
+    transiently relax the restriction, but ALT activates the menubar of the
+    currently-foreground window (e.g. Chrome's "File / Edit / View ..." bar),
+    and a subsequent Ctrl+V can leak into the wrong target. The AttachThreadInput
+    workaround attaches this thread to the foreground thread and uses its
+    permissions to call SetForegroundWindow, without emitting any keystroke.
+
+    Kept as a defensive helper; v9 no longer relies on it for the main paste
+    flow (which goes through wezterm cli send-text).
     """
     try:
+        import ctypes as _ct
         import win32gui as _w
         import win32con as _wc
-        pyautogui.keyDown("alt")
-        pyautogui.keyUp("alt")
+
+        user32 = _ct.windll.user32
+        kernel32 = _ct.windll.kernel32
+
+        fg = user32.GetForegroundWindow()
+        if fg == hwnd:
+            return True
+
         try:
             placement = _w.GetWindowPlacement(hwnd)
             if placement[1] == _wc.SW_SHOWMINIMIZED:
                 _w.ShowWindow(hwnd, _wc.SW_RESTORE)
         except Exception:
             pass
-        _w.SetForegroundWindow(hwnd)
-        return True
+
+        cur_tid = kernel32.GetCurrentThreadId()
+        fg_tid = user32.GetWindowThreadProcessId(fg, None) if fg else 0
+        attached = False
+        if fg_tid and fg_tid != cur_tid:
+            if user32.AttachThreadInput(cur_tid, fg_tid, True):
+                attached = True
+        try:
+            user32.BringWindowToTop(hwnd)
+            user32.SetForegroundWindow(hwnd)
+            user32.SetFocus(hwnd)
+        finally:
+            if attached:
+                user32.AttachThreadInput(cur_tid, fg_tid, False)
+
+        return user32.GetForegroundWindow() == hwnd
     except Exception as e:
         sys.stderr.write(f"[launcher] _force_foreground failed: {e}\n")
         return False
@@ -606,54 +799,51 @@ def _force_foreground(hwnd: int) -> bool:
 def _sendkeys_raw_payload(payload: str,
                           tab_id: int | None = None,
                           auto_submit: bool = False) -> dict:
-    """Low-level helper: paste an arbitrary payload string into the CC CLI input.
+    """Inject an arbitrary payload string into a specific CC CLI pane.
 
     Shared by single-image injection (Phase 1) and multi-image injection
-    (Phase 1.5 recording frames). Uses ALT-key trick for foreground grab.
+    (Phase 1.5 recording frames). v9 replaced the older clipboard +
+    SetForegroundWindow + Ctrl+V approach with `wezterm cli send-text
+    --pane-id` because the old path:
+      (a) sent paste to the wrong target when the active WezTerm tab was a
+          shell (pwsh / cmd) rather than CC CLI,
+      (b) had an ALT-key side effect that activated the Chrome menubar when
+          Chrome was the foreground window,
+      (c) raced with OS-window title cache between activate-tab and the find.
+    The new path targets pane_id directly: no active-tab dependency, no
+    foreground steal, no Chrome menubar side effect, atomic.
     """
     if tab_id is not None:
-        _activate_wezterm_tab(tab_id)
-        time.sleep(0.3)
+        pane_info = _find_pane_for_tab(tab_id)
+        if pane_info is None:
+            return {
+                "status": "error",
+                "reason": f"tab_id={tab_id} not found in wezterm cli list",
+            }
+    else:
+        pane_info = _find_cc_cli_pane()
+        if pane_info is None:
+            return {
+                "status": "error",
+                "reason": (
+                    "No CC CLI pane found (wezterm cli list contains no tab "
+                    "matching the project + non-shell criteria). Start a "
+                    "Claude Code CLI session in WezTerm, or pick a tab "
+                    "explicitly from the Target Tab dropdown."
+                ),
+            }
+        sys.stderr.write(
+            f"[launcher] auto-detected pane_id={pane_info['pane_id']} "
+            f"tab_id={pane_info['tab_id']} title={pane_info['title']!r}\n"
+        )
 
-    win = _find_cc_cli_window(strict=True)
-    if win is None:
-        return {
-            "status": "error",
-            "reason": "No CC CLI tab visible (pattern [N/M]). Switch to a Claude Code CLI session tab in WezTerm and retry.",
-        }
-
-    try:
-        prev_clip = pyperclip.paste()
-    except Exception:
-        prev_clip = None
-    pyperclip.copy(payload)
-
-    fg_ok = _force_foreground(win._hWnd)
-    time.sleep(0.35)
-
-    pyautogui.hotkey("ctrl", "v")
-    time.sleep(0.15)
-
-    if auto_submit:
-        time.sleep(0.3)
-        pyautogui.press("enter")
-        time.sleep(0.1)
-
-    time.sleep(0.25)
-    if prev_clip is not None:
-        try:
-            pyperclip.copy(prev_clip)
-        except Exception:
-            pass
-
-    return {
-        "status": "sent",
-        "payload_length": len(payload),
-        "window": win.title,
-        "foreground_ok": fg_ok,
-        "tab_id": tab_id,
-        "auto_submit": auto_submit,
-    }
+    pane_id = pane_info["pane_id"]
+    result = _wezterm_send_to_pane(pane_id, payload, submit=auto_submit)
+    result["pane_id"] = pane_id
+    result["tab_id"] = pane_info.get("tab_id")
+    result["title"] = pane_info.get("title")
+    result["payload_length"] = len(payload)
+    return result
 
 
 def _sendkeys_to_cc_cli(image_path: str, intent: str,
@@ -671,18 +861,22 @@ def _sendkeys_to_cc_cli(image_path: str, intent: str,
 
 # ====== Auto-send for native capture endpoints ======
 
-def _auto_send_if_requested(path: str) -> None:
+def _auto_send_if_requested(path: str):
     """When the X-Auto-Send header is "1", paste the captured image into the CC CLI.
 
-    The return value of _sendkeys_to_cc_cli is logged (including non-exception
-    `{"status": "error"}` cases) to avoid silent failures.
+    Returns the SendKeys result dict (or None if auto-send is disabled) so the
+    surrounding route can surface the true outcome to the UI. Previously the
+    frontend printed "(CC CLI 投入済)" unconditionally whenever auto-send was
+    on, even if the underlying paste was rejected — this fixes that.
 
     Optional headers:
-        X-Tab-Id: target WezTerm tab_id (activate via wezterm cli before paste)
+        X-Tab-Id: target WezTerm tab_id (use this exact tab instead of auto-detect)
         X-Auto-Submit: "1" sends Enter after paste
     """
     from urllib.parse import unquote
     auto = request.headers.get("X-Auto-Send", "0") == "1"
+    if not (auto and path):
+        return None
     intent_raw = request.headers.get("X-Intent", "")
     try:
         intent = unquote(intent_raw)
@@ -691,15 +885,25 @@ def _auto_send_if_requested(path: str) -> None:
     tab_id_raw = request.headers.get("X-Tab-Id", "")
     tab_id = int(tab_id_raw) if tab_id_raw.isdigit() else None
     auto_submit = request.headers.get("X-Auto-Submit", "0") == "1"
-    if auto and path:
-        try:
-            result = _sendkeys_to_cc_cli(
-                path, intent or "Look at this screenshot.",
-                tab_id=tab_id, auto_submit=auto_submit,
-            )
-            sys.stderr.write(f"[launcher] auto-send result: {result}\n")
-        except Exception as e:
-            sys.stderr.write(f"[launcher] auto-send SendKeys EXCEPTION: {e}\n")
+    try:
+        result = _sendkeys_to_cc_cli(
+            path, intent or "Look at this screenshot.",
+            tab_id=tab_id, auto_submit=auto_submit,
+        )
+        sys.stderr.write(f"[launcher] auto-send result: {result}\n")
+        return result
+    except Exception as e:
+        sys.stderr.write(f"[launcher] auto-send SendKeys EXCEPTION: {e}\n")
+        return {"status": "error", "reason": f"exception: {e}"}
+
+
+def _capture_response(path: str) -> dict:
+    """Build the JSON body for a capture route, merging in send_result if auto-send ran."""
+    response = {"path": path}
+    send_result = _auto_send_if_requested(path)
+    if send_result is not None:
+        response["send_result"] = send_result
+    return response
 
 
 # ====== Main ======

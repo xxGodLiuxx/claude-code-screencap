@@ -75,8 +75,10 @@ Full setup details: [docs/SETUP.md](docs/SETUP.md).
 │  getDisplayMedia        │ ──HTTPS─►  Flask receives PNG/WebM     │
 │  → PNG blob or WebM     │         │  → inbox/ or recordings/<ts>/│
 │                         │         │  → ffmpeg fps=1 frame split  │
-│                         │         │  → wezterm cli activate-tab  │
-│                         │         │  → pyperclip + Ctrl+V + Enter│
+│                         │         │  → wezterm cli list → find   │
+│                         │         │     CC CLI pane by project   │
+│                         │         │  → wezterm cli send-text     │
+│                         │         │     --pane-id N (+ Enter)    │
 └─────────────────────────┘         └──────────────────────────────┘
                                                   │
                                                   ▼
@@ -129,9 +131,9 @@ All other trademarks are the property of their respective owners.
 
 Built with:
 - [Flask](https://flask.palletsprojects.com/) — backend
-- [pyautogui](https://pyautogui.readthedocs.io/) + [pyperclip](https://pyperclip.readthedocs.io/) + [pygetwindow](https://pygetwindow.readthedocs.io/) — SendKeys
+- [pygetwindow](https://pygetwindow.readthedocs.io/) — window enumeration (pyautogui + pyperclip retained as defensive fallbacks; v9 injection path uses `wezterm cli send-text`)
 - [pywin32](https://github.com/mhammond/pywin32) — PrintWindow API
 - [mss](https://python-mss.readthedocs.io/) — fallback screen capture
-- [WezTerm](https://wezterm.org/) — terminal with `cli list / activate-tab` support
+- [WezTerm](https://wezterm.org/) — terminal with `cli list / send-text` support (v9 injection target)
 - [ffmpeg](https://ffmpeg.org/) — frame extraction
 - [Anthropic Claude Code](https://www.anthropic.com/claude-code) — the AI agent receiving the captures
