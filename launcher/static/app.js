@@ -170,6 +170,22 @@
         o.textContent = `[${t.tab_id}] ${t.project || "?"} — ${titleShort}`;
         ui.ccTabSelect.appendChild(o);
       }
+      // Restore the user's last picked tab from localStorage (only if it still exists in the list).
+      try {
+        const lastVal = localStorage.getItem("ccTabSelect.lastValue");
+        if (lastVal && Array.from(ui.ccTabSelect.options).some(o => o.value === lastVal)) {
+          ui.ccTabSelect.value = lastVal;
+        }
+      } catch (e) { /* localStorage unavailable */ }
+      // Bind the change listener once (loadCcTabs can be re-invoked by the refresh button).
+      if (!ui.ccTabSelect._lsChangeBound) {
+        ui.ccTabSelect.addEventListener("change", () => {
+          if (ui.ccTabSelect.value) {
+            try { localStorage.setItem("ccTabSelect.lastValue", ui.ccTabSelect.value); } catch (e) {}
+          }
+        });
+        ui.ccTabSelect._lsChangeBound = true;
+      }
       setStatus(`WezTerm tabs: ${tabs.length} 件取得`, "success");
     } catch (e) {
       setStatus(`tabs fetch failed: ${e.message}`, "error");
