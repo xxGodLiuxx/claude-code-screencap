@@ -162,7 +162,7 @@
         return;
       }
       const tabs = j.tabs || [];
-      ui.ccTabSelect.innerHTML = '<option value="">(自動検出)</option>';
+      ui.ccTabSelect.innerHTML = '<option value="" disabled selected>-- Tab を選択 --</option>';
       for (const t of tabs) {
         const o = document.createElement("option");
         o.value = String(t.tab_id);

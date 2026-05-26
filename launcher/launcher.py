@@ -394,6 +394,60 @@ def cc_status():
 WEZTERM_CLI = os.environ.get("WEZTERM_CLI", r"C:\Program Files\WezTerm\wezterm.exe")
 
 
+def _resolve_wezterm_socket() -> "str | None":
+    """Find the live wezterm-gui.exe process via tasklist, return its `gui-sock-<PID>` absolute path.
+
+    Background: if the launcher starts before WezTerm (Startup-folder ordering) or if a
+    WezTerm GUI exits and a new one is launched mid-session, the launcher's inherited
+    `WEZTERM_UNIX_SOCKET` env still points at the dead PID, causing `failed to connect to
+    Socket("gui-sock-<old PID>")` on every `wezterm cli` call. Resolving the socket from the
+    live PID on each call gives transparent auto-reconnect, no launcher restart required.
+    """
+    try:
+        r = subprocess.run(
+            ["tasklist", "/FI", "IMAGENAME eq wezterm-gui.exe", "/FO", "CSV", "/NH"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=3,
+            creationflags=subprocess.CREATE_NO_WINDOW,
+            text=True,
+        )
+        if r.returncode != 0 or not (r.stdout or "").strip():
+            return None
+        base = Path(os.environ.get("USERPROFILE", str(Path.home()))) / ".local" / "share" / "wezterm"
+        for line in r.stdout.splitlines():
+            parts = [p.strip().strip('"') for p in line.split(",")]
+            if len(parts) < 2:
+                continue
+            try:
+                pid = int(parts[1])
+            except ValueError:
+                continue
+            sock = base / f"gui-sock-{pid}"
+            if sock.exists():
+                return str(sock)
+        return None
+    except Exception as e:
+        sys.stderr.write(f"[launcher] _resolve_wezterm_socket failed: {e}\n")
+        return None
+
+
+def _wezterm_env() -> dict:
+    """Return a subprocess.run env that overrides `WEZTERM_UNIX_SOCKET` with the live PID's socket.
+
+    If resolution fails (WezTerm not running / tasklist failure), pop the variable so wezterm cli
+    falls back to its default search. The invariant: never let a stale inherited value reach
+    the subprocess — overwrite or pop, never pass through.
+    """
+    env = dict(os.environ)
+    socket_path = _resolve_wezterm_socket()
+    if socket_path is not None:
+        env["WEZTERM_UNIX_SOCKET"] = socket_path
+    else:
+        env.pop("WEZTERM_UNIX_SOCKET", None)
+    return env
+
+
 @app.route("/api/cc/tabs", methods=["GET"])
 @require_token
 def cc_tabs():
@@ -411,6 +465,7 @@ def cc_tabs():
             stderr=subprocess.PIPE,
             timeout=5,
             creationflags=subprocess.CREATE_NO_WINDOW,
+            env=_wezterm_env(),
         )
         if r.returncode != 0:
             err = (r.stderr or b"").decode("utf-8", errors="replace").strip()
@@ -455,6 +510,7 @@ def _wezterm_list_panes() -> "list | None":
             stderr=subprocess.PIPE,
             timeout=5,
             creationflags=subprocess.CREATE_NO_WINDOW,
+            env=_wezterm_env(),
         )
         if r.returncode != 0:
             return None
@@ -553,6 +609,7 @@ def _wezterm_send_to_pane(pane_id: int, text: str, submit: bool = False) -> dict
             stderr=subprocess.PIPE,
             timeout=5,
             creationflags=subprocess.CREATE_NO_WINDOW,
+            env=_wezterm_env(),
         )
         if r1.returncode != 0:
             err = (r1.stderr or b"").decode("utf-8", errors="replace").strip()
@@ -568,6 +625,7 @@ def _wezterm_send_to_pane(pane_id: int, text: str, submit: bool = False) -> dict
                 stderr=subprocess.PIPE,
                 timeout=3,
                 creationflags=subprocess.CREATE_NO_WINDOW,
+                env=_wezterm_env(),
             )
             if r2.returncode != 0:
                 err = (r2.stderr or b"").decode("utf-8", errors="replace").strip()
@@ -595,6 +653,7 @@ def _activate_wezterm_tab(tab_id: int) -> bool:
             timeout=3,
             creationflags=subprocess.CREATE_NO_WINDOW,
             check=True,
+            env=_wezterm_env(),
         )
         return True
     except Exception as e:
