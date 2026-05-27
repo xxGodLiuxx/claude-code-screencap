@@ -31,6 +31,12 @@
     captureDelay: $("#capture-delay"),
     countdownOverlay: $("#countdown-overlay"),
     countdownNumber: $("#countdown-number"),
+    uploadFileInput: $("#upload-file-input"),
+    uploadFolderInput: $("#upload-folder-input"),
+    uploadDropzone: $("#upload-dropzone"),
+    uploadProgress: $("#upload-progress"),
+    uploadProgressFill: $("#upload-progress .fill"),
+    uploadProgressText: $("#upload-progress .text"),
   };
 
   let selectedTabId = null;
@@ -310,7 +316,7 @@
 
       const fd = new FormData();
       fd.append("image", blob, "browser_capture.png");
-      fd.append("intent", ui.intent.value || "このスクショを見て");
+      fd.append("intent", ui.intent.value || "");
       fd.append("auto_send", ui.autoSend.checked ? "1" : "0");
       fd.append("auto_submit", ui.autoSubmit && ui.autoSubmit.checked ? "1" : "0");
       fd.append("tab_id", (ui.ccTabSelect && ui.ccTabSelect.value) || "");
@@ -493,7 +499,7 @@
   const uploadRecording = async (blob) => {
     const fd = new FormData();
     fd.append("video", blob, "recording.webm");
-    fd.append("intent", ui.intent.value || "字幕抽出してください");
+    fd.append("intent", ui.intent.value || "");
     fd.append("auto_send", ui.autoSend.checked ? "1" : "0");
     fd.append("auto_submit", ui.autoSubmit && ui.autoSubmit.checked ? "1" : "0");
     fd.append("tab_id", (ui.ccTabSelect && ui.ccTabSelect.value) || "");
@@ -558,7 +564,7 @@
 
       const fd = new FormData();
       fd.append("image", blob, "browser_fullscreen.png");
-      fd.append("intent", ui.intent.value || "このスクショを見て");
+      fd.append("intent", ui.intent.value || "");
       fd.append("auto_send", ui.autoSend.checked ? "1" : "0");
 
       setStatus("upload 中...", "warn");
@@ -791,7 +797,7 @@
       const r = await afetch("/api/cc/send", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ path, intent: ui.intent.value || "このスクショを見て" }),
+        body: JSON.stringify({ path, intent: ui.intent.value || "" }),
       });
       const j = await r.json();
       if (j.error) {
@@ -809,6 +815,223 @@
   const escapeHtml = (s) => String(s).replace(/[&<>"']/g, (c) => ({
     "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
   }[c]));
+
+  // ====== Upload (files / folder → CC CLI injection) ======
+  // Multipart POST via the same path as record_upload / browser_upload. Works
+  // identically from any device on the same secure context (Tailnet HTTPS, etc).
+  // Files land in <inbox>/uploads/<ts>/ on the host. With auto_send=on, the
+  // payload is `@p1 @p2 ...` (mode=files) or `@<upload_dir>` (mode=folder),
+  // routed to the selected WezTerm Target Tab.
+
+  // Recursively flatten a FileSystemEntry into [{file, relpath}, ...].
+  // readEntries() returns at most 100 entries per call (historic Chromium
+  // quirk), so loop until it returns an empty array.
+  const _traverseEntry = async (entry, basePath = "") => {
+    const collected = [];
+    if (entry.isFile) {
+      const file = await new Promise((res, rej) => entry.file(res, rej));
+      collected.push({ file, relpath: basePath + entry.name });
+    } else if (entry.isDirectory) {
+      const reader = entry.createReader();
+      while (true) {
+        const entries = await new Promise((res, rej) => reader.readEntries(res, rej));
+        if (!entries.length) break;
+        for (const child of entries) {
+          const sub = await _traverseEntry(child, basePath + entry.name + "/");
+          collected.push(...sub);
+        }
+      }
+    }
+    return collected;
+  };
+
+  // XMLHttpRequest-based multipart upload (fetch() cannot observe upload
+  // progress). Resolves with parsed JSON on 2xx, rejects on 401 / network /
+  // non-2xx with a short error message.
+  const _xhrUpload = (url, formData, onProgress) => {
+    return new Promise((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open("POST", url);
+      const tok = getToken();
+      if (tok) xhr.setRequestHeader("Authorization", `Bearer ${tok}`);
+      xhr.upload.onprogress = (e) => {
+        if (e.lengthComputable && onProgress) onProgress(e.loaded, e.total);
+      };
+      xhr.onload = () => {
+        if (xhr.status >= 200 && xhr.status < 300) {
+          try { resolve(JSON.parse(xhr.responseText)); }
+          catch (e) { reject(new Error(`bad JSON response: ${xhr.responseText.slice(0, 200)}`)); }
+        } else if (xhr.status === 401) {
+          reject(new Error("401 認証失敗、token を確認"));
+        } else {
+          reject(new Error(`HTTP ${xhr.status}: ${xhr.responseText.slice(0, 200)}`));
+        }
+      };
+      xhr.onerror = () => reject(new Error("network error"));
+      xhr.send(formData);
+    });
+  };
+
+  const _fmtBytes = (n) => {
+    if (n < 1024) return `${n} B`;
+    if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+    if (n < 1024 * 1024 * 1024) return `${(n / 1024 / 1024).toFixed(1)} MB`;
+    return `${(n / 1024 / 1024 / 1024).toFixed(2)} GB`;
+  };
+
+  const _showUploadProgress = (label) => {
+    if (!ui.uploadProgress) return;
+    ui.uploadProgress.classList.remove("hidden");
+    if (ui.uploadProgressFill) ui.uploadProgressFill.style.width = "0%";
+    if (ui.uploadProgressText) ui.uploadProgressText.textContent = label;
+  };
+
+  const _hideUploadProgress = () => {
+    if (ui.uploadProgress) ui.uploadProgress.classList.add("hidden");
+  };
+
+  // Core: send a collected [{file, relpath}, ...] list as multipart.
+  // mode "folder" → backend builds `@<upload_dir>` payload; "files" → `@p1 @p2 ...`.
+  const doUpload = async (collected, mode) => {
+    if (!collected || !collected.length) {
+      setStatus("upload 対象 0 件、操作 skip", "warn");
+      return;
+    }
+    const totalBytes = collected.reduce((s, c) => s + (c.file.size || 0), 0);
+    setStatus(`upload 準備: ${collected.length} files / ${_fmtBytes(totalBytes)} (mode=${mode})`, "warn");
+    _showUploadProgress(`0% (0 / ${_fmtBytes(totalBytes)})`);
+
+    const fd = new FormData();
+    for (const { file, relpath } of collected) {
+      fd.append("files", file, file.name);
+      fd.append("relpaths", relpath || file.name);
+    }
+    fd.append("mode", mode);
+    fd.append("intent", ui.intent.value || "");
+    fd.append("auto_send", ui.autoSend.checked ? "1" : "0");
+    fd.append("auto_submit", ui.autoSubmit && ui.autoSubmit.checked ? "1" : "0");
+    fd.append("tab_id", (ui.ccTabSelect && ui.ccTabSelect.value) || "");
+
+    try {
+      const j = await _xhrUpload("/api/upload/files", fd, (loaded, total) => {
+        const pct = total > 0 ? Math.round((loaded / total) * 100) : 0;
+        if (ui.uploadProgressFill) ui.uploadProgressFill.style.width = `${pct}%`;
+        if (ui.uploadProgressText) {
+          ui.uploadProgressText.textContent =
+            `${pct}% (${_fmtBytes(loaded)} / ${_fmtBytes(total)})`;
+        }
+      });
+      _hideUploadProgress();
+      if (j.error) {
+        setStatus(`upload error: ${j.error}`, "error");
+        return;
+      }
+      let suffix = "";
+      let level = "success";
+      if (ui.autoSend.checked) {
+        if (j.send_result && j.send_result.status === "sent") {
+          const submitted = j.send_result.auto_submit ? " + Enter 送信" : "";
+          suffix = ` → CC CLI 投入済 (mode=${j.mode}${submitted})`;
+        } else if (j.send_result) {
+          suffix = ` (送信失敗: ${j.send_result.reason || "?"})`;
+          level = "warn";
+        } else if (j.send_error) {
+          suffix = ` (送信例外: ${j.send_error})`;
+          level = "warn";
+        }
+      } else {
+        suffix = ` (auto_send off、upload_dir=${j.upload_dir})`;
+      }
+      setStatus(`OK: ${j.file_count} files / ${_fmtBytes(j.total_bytes)}${suffix}`, level);
+    } catch (e) {
+      _hideUploadProgress();
+      setStatus(`upload failed: ${e.message}`, "error");
+    }
+  };
+
+  const _onFilesPicked = async (fileList) => {
+    if (!fileList || !fileList.length) return;
+    const collected = Array.from(fileList).map((f) => ({ file: f, relpath: f.name }));
+    await doUpload(collected, "files");
+  };
+
+  const _onFolderPicked = async (fileList) => {
+    if (!fileList || !fileList.length) return;
+    const collected = Array.from(fileList).map((f) => ({
+      file: f,
+      relpath: f.webkitRelativePath || f.name,
+    }));
+    await doUpload(collected, "folder");
+  };
+
+  // Drag-drop: if any entry is a directory we use webkitGetAsEntry recursion
+  // and mode=folder, else mode=files. Falls back to dataTransfer.files on
+  // older browsers (no folder support).
+  const _onDrop = async (dataTransfer) => {
+    const items = dataTransfer.items;
+    if (items && items.length && items[0].webkitGetAsEntry) {
+      const entries = [];
+      for (let i = 0; i < items.length; i++) {
+        const e = items[i].webkitGetAsEntry && items[i].webkitGetAsEntry();
+        if (e) entries.push(e);
+      }
+      const hasFolder = entries.some((e) => e.isDirectory);
+      const collected = [];
+      for (const e of entries) {
+        const sub = await _traverseEntry(e, "");
+        collected.push(...sub);
+      }
+      await doUpload(collected, hasFolder ? "folder" : "files");
+    } else {
+      await _onFilesPicked(dataTransfer.files);
+    }
+  };
+
+  const _bindDropzone = () => {
+    if (!ui.uploadDropzone) return;
+    const dz = ui.uploadDropzone;
+    ["dragenter", "dragover"].forEach((ev) => {
+      dz.addEventListener(ev, (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        dz.classList.add("dragover");
+      });
+    });
+    ["dragleave", "drop"].forEach((ev) => {
+      dz.addEventListener(ev, (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        dz.classList.remove("dragover");
+      });
+    });
+    dz.addEventListener("drop", (e) => {
+      _onDrop(e.dataTransfer).catch((err) => {
+        setStatus(`drop handler error: ${err.message}`, "error");
+      });
+    });
+    dz.addEventListener("click", () => {
+      if (ui.uploadFileInput) ui.uploadFileInput.click();
+    });
+  };
+
+  const _bindUploadInputs = () => {
+    if (ui.uploadFileInput) {
+      ui.uploadFileInput.addEventListener("change", (e) => {
+        _onFilesPicked(e.target.files).catch((err) => {
+          setStatus(`file upload error: ${err.message}`, "error");
+        });
+        e.target.value = "";
+      });
+    }
+    if (ui.uploadFolderInput) {
+      ui.uploadFolderInput.addEventListener("change", (e) => {
+        _onFolderPicked(e.target.files).catch((err) => {
+          setStatus(`folder upload error: ${err.message}`, "error");
+        });
+        e.target.value = "";
+      });
+    }
+  };
 
   // ====== Button bindings ======
 
@@ -860,6 +1083,12 @@
       case "latest_show":
         ui.recentSection.classList.remove("hidden");
         loadRecent();
+        break;
+      case "upload_files_pick":
+        if (ui.uploadFileInput) ui.uploadFileInput.click();
+        break;
+      case "upload_folder_pick":
+        if (ui.uploadFolderInput) ui.uploadFolderInput.click();
         break;
       case "auth-save":
         {
@@ -925,6 +1154,13 @@
     }
   } catch (e) {
     console.error("[launcher] cc tabs auto-load error:", e);
+  }
+
+  try {
+    _bindDropzone();
+    _bindUploadInputs();
+  } catch (e) {
+    console.error("[launcher] upload bind error:", e);
   }
 
   try {

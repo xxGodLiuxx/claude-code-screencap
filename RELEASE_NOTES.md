@@ -1,5 +1,30 @@
 # Release Notes
 
+## v11 — File / folder upload + empty default intent
+
+**New: `/api/upload/files` endpoint + 📤 Upload UI section**
+
+Generalizes the existing `cap_browser_upload` (image) and `cap_record_upload` (webm) endpoints to accept any file(s) or a recursive folder tree via multipart upload. Files land in `<inbox>/uploads/<ts>/` on the host, and (with `auto_send`) the launcher injects either `@<path1> @<path2> ... @<pathN>` (file mode, each file attached individually) or `@<upload_dir>` (folder mode, single dir reference so Claude can explore on its own).
+
+The frontend exposes three entry points, all sharing the same Target Tab / auto_send / Intent controls:
+- 📄 ファイル button — multi-file picker
+- 📁 フォルダ button — `webkitdirectory` recursive picker (Chromium / Edge)
+- Drag-and-drop zone — files OR folders, recursively flattened via `webkitGetAsEntry` + `FileSystemDirectoryReader.readEntries` (loops past Chromium's 100-entry batch limit)
+
+Browser-supplied relative paths are normalized via `_safe_relpath()`, which rejects parent refs (`..`), drive letters, null bytes, and absolute prefixes — uploads cannot escape `<inbox>/uploads/<ts>/`.
+
+Upload progress is rendered via `XMLHttpRequest.upload.onprogress` (fetch() cannot observe upload progress).
+
+**Change: default `intent` is now empty across all endpoints**
+
+Previously the launcher fell back to `"Look at this screenshot."` / `"Extract subtitles from these frames."` etc. when no intent was supplied. With this release the default is empty everywhere, and the SendKeys payload omits the trailing space + intent suffix entirely — so an unattended upload sends `@<path>` alone, leaving the CC CLI prompt clean for the user to type their per-shot intent.
+
+Rationale: in practice each capture/upload has a different intent, so a sticky default was usually wrong and had to be cleared anyway.
+
+Sites updated: `cap_browser_upload`, `cap_record_upload`, `cc_send`, `_auto_send_if_requested`, `_sendkeys_to_cc_cli`, the Intent input default in `index.html`, and all five `|| "default"` fallback sites in `app.js`.
+
+---
+
 ## v10 — WezTerm socket auto-resolve + drop auto-detect UI
 
 **Fix: stale `WEZTERM_UNIX_SOCKET` after a WezTerm GUI restart**

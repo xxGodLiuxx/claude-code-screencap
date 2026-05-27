@@ -78,6 +78,33 @@ SSL_CERT = Path(_SSL_CERT_ENV) if _SSL_CERT_ENV else None
 SSL_KEY = Path(_SSL_KEY_ENV) if _SSL_KEY_ENV else None
 
 
+def _safe_relpath(name: str) -> Path:
+    """Normalize a multipart-upload filename / webkitRelativePath into a
+    path-traversal-safe relative Path.
+
+    Allowed:  `foo.txt`, `src/app.tsx`, `dir/sub/file.csv`
+    Rejected: `../etc/passwd`, `/etc/passwd`, `C:\\Windows\\...`, null byte,
+              empty, `..` anywhere in the path
+
+    Browser-supplied relpaths are completely untrusted. To guarantee that the
+    saved file stays under the upload root, this rejects parent refs (`..`),
+    drive letters (`:`), null bytes, and absolute prefixes.
+    """
+    if not name or not name.strip():
+        raise ValueError("empty name")
+    if "\x00" in name:
+        raise ValueError("null byte in name")
+    parts = [p for p in name.replace("\\", "/").split("/") if p and p != "."]
+    if not parts:
+        raise ValueError(f"empty after normalize: {name}")
+    for p in parts:
+        if p == "..":
+            raise ValueError(f"parent dir reference: {name}")
+        if ":" in p:
+            raise ValueError(f"colon in path component (drive letter / NTFS stream): {name}")
+    return Path(*parts)
+
+
 def _load_token() -> str:
     tok = keyring.get_password(KEYRING_SERVICE, KEYRING_TOKEN_KEY)
     if not tok:
@@ -237,7 +264,7 @@ def cap_browser_upload():
     if "image" not in request.files:
         return jsonify({"error": "image file required"}), 400
     f = request.files["image"]
-    intent = (request.form.get("intent") or "Look at this screenshot.").strip()
+    intent = (request.form.get("intent") or "").strip()
     auto_send = request.form.get("auto_send", "0") == "1"
     tab_id_raw = request.form.get("tab_id", "")
     tab_id = int(tab_id_raw) if tab_id_raw.isdigit() else None
@@ -278,7 +305,7 @@ def cap_record_upload():
 
     multipart/form-data:
         video: <webm blob>
-        intent: <text> (default "Extract subtitles from these frames.")
+        intent: <text> (default empty; empty intent omits the trailing space + intent suffix)
         auto_send: "0" / "1"
         auto_submit: "0" / "1"
         tab_id: WezTerm target tab id
@@ -287,7 +314,7 @@ def cap_record_upload():
     if "video" not in request.files:
         return jsonify({"error": "video file required"}), 400
     f = request.files["video"]
-    intent = (request.form.get("intent") or "Extract subtitles from these frames.").strip()
+    intent = (request.form.get("intent") or "").strip()
     auto_send = request.form.get("auto_send", "0") == "1"
     tab_id_raw = request.form.get("tab_id", "")
     tab_id = int(tab_id_raw) if tab_id_raw.isdigit() else None
@@ -338,7 +365,7 @@ def cap_record_upload():
 
     if auto_send:
         paths_str = " ".join(f"@{p}" for p in frame_paths)
-        payload = f"{paths_str} {intent}"
+        payload = f"{paths_str} {intent}" if intent else paths_str
         try:
             send_result = _sendkeys_raw_payload(
                 payload, tab_id=tab_id, auto_submit=auto_submit,
@@ -351,6 +378,109 @@ def cap_record_upload():
     return jsonify(result)
 
 
+@app.route("/api/upload/files", methods=["POST"])
+@require_token
+def upload_files():
+    """Receive arbitrary files or a folder tree from the browser via multipart,
+    save to `<screenshots-parent>/uploads/<ts>/`, optionally inject into Claude
+    Code CLI.
+
+    Generalizes `cap_browser_upload` (image) and `cap_record_upload` (webm) to
+    any file type. Useful for handing Claude a folder of source files, logs,
+    docs, screenshots, etc. without leaving the browser.
+
+    multipart/form-data:
+        files: <blob> (repeated, one per file)
+        relpaths: <string> (repeated, parallel to files, webkitRelativePath or empty)
+        mode: "files" (default, inject as `@p1 @p2 ...`) /
+              "folder" (inject as `@<upload_dir>` single ref)
+        intent: free-form text (default empty; if empty no trailing space in payload)
+        auto_send: "0" / "1" (default "0")
+        auto_submit: "0" / "1" (default "0"; auto_send + Enter)
+        tab_id: target WezTerm tab id (empty → auto-detect)
+
+    response: {upload_dir, saved_paths[], file_count, total_bytes, mode, send_result?}
+
+    Payload shape:
+        mode="files"  → `@p1 @p2 ... @pN <intent>` (record_upload-style, each
+                        file attached individually)
+        mode="folder" → `@<upload_dir> <intent>` (single dir ref, Claude can
+                        explore the contents on its own)
+    """
+    files = request.files.getlist("files")
+    if not files:
+        return jsonify({"error": "no files provided (use multipart field name 'files')"}), 400
+
+    relpaths = request.form.getlist("relpaths")
+    mode = (request.form.get("mode") or "files").strip()
+    if mode not in ("files", "folder"):
+        return jsonify({"error": f"invalid mode: {mode} (expect 'files' or 'folder')"}), 400
+    intent = (request.form.get("intent") or "").strip()
+    auto_send = request.form.get("auto_send", "0") == "1"
+    auto_submit = request.form.get("auto_submit", "0") == "1"
+    tab_id_raw = request.form.get("tab_id", "")
+    tab_id = int(tab_id_raw) if tab_id_raw.isdigit() else None
+
+    ts = time.strftime("%Y%m%d_%H%M%S")
+    upload_root = smcp.OUT_DIR.parent / "uploads" / ts
+    upload_root.mkdir(parents=True, exist_ok=True)
+
+    saved = []
+    total_bytes = 0
+    for i, f in enumerate(files):
+        # Prefer relpath (folder upload, e.g. `src/foo/bar.txt`); otherwise the
+        # browser-provided filename basename.
+        rel_raw = ""
+        if i < len(relpaths) and relpaths[i]:
+            rel_raw = relpaths[i]
+        elif f.filename:
+            rel_raw = f.filename
+        else:
+            rel_raw = f"file_{i:04d}"
+        try:
+            rel_path = _safe_relpath(rel_raw)
+        except ValueError as e:
+            return jsonify({"error": f"unsafe path '{rel_raw}': {e}"}), 400
+        dest = upload_root / rel_path
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        f.save(str(dest))
+        saved.append(str(dest))
+        try:
+            total_bytes += dest.stat().st_size
+        except OSError:
+            pass
+
+    sys.stderr.write(
+        f"[launcher] upload: {len(saved)} files / {total_bytes} bytes "
+        f"→ {upload_root} (mode={mode})\n"
+    )
+
+    result = {
+        "upload_dir": str(upload_root),
+        "saved_paths": saved,
+        "file_count": len(saved),
+        "total_bytes": total_bytes,
+        "mode": mode,
+    }
+
+    if auto_send:
+        if mode == "folder":
+            payload = f"@{upload_root} {intent}" if intent else f"@{upload_root}"
+        else:
+            paths_joined = " ".join(f"@{p}" for p in saved)
+            payload = f"{paths_joined} {intent}" if intent else paths_joined
+        try:
+            send_result = _sendkeys_raw_payload(
+                payload, tab_id=tab_id, auto_submit=auto_submit,
+            )
+            result["send_result"] = send_result
+            sys.stderr.write(f"[launcher] upload auto-send: {send_result}\n")
+        except Exception as e:
+            result["send_error"] = str(e)
+            sys.stderr.write(f"[launcher] upload auto-send EXCEPTION: {e}\n")
+    return jsonify(result)
+
+
 @app.route("/api/cc/send", methods=["POST"])
 @require_token
 def cc_send():
@@ -360,7 +490,7 @@ def cc_send():
     """
     data = request.get_json() or {}
     path = data.get("path", "").strip()
-    intent = data.get("intent", "Look at this screenshot.").strip()
+    intent = (data.get("intent") or "").strip()
     if not path:
         return jsonify({"error": "path required"}), 400
     try:
@@ -909,8 +1039,9 @@ def _sendkeys_to_cc_cli(image_path: str, intent: str,
                         tab_id: int | None = None,
                         auto_submit: bool = False) -> dict:
     """Single-image injection. Builds `@<path> <intent>` and delegates to
-    _sendkeys_raw_payload."""
-    payload = f"@{image_path} {intent}"
+    _sendkeys_raw_payload. Empty intent omits the trailing space + intent suffix,
+    sending just `@<path>` so the user can keep typing in the CC CLI prompt."""
+    payload = f"@{image_path} {intent}" if intent else f"@{image_path}"
     result = _sendkeys_raw_payload(payload, tab_id=tab_id, auto_submit=auto_submit)
     if result.get("status") == "sent":
         result["path"] = image_path
@@ -946,7 +1077,7 @@ def _auto_send_if_requested(path: str):
     auto_submit = request.headers.get("X-Auto-Submit", "0") == "1"
     try:
         result = _sendkeys_to_cc_cli(
-            path, intent or "Look at this screenshot.",
+            path, intent,
             tab_id=tab_id, auto_submit=auto_submit,
         )
         sys.stderr.write(f"[launcher] auto-send result: {result}\n")

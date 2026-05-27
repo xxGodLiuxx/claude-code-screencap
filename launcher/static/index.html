@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Claude Code Screencap</title>
-  <link rel="stylesheet" href="/static/style.css?v=20260525-26">
+  <link rel="stylesheet" href="/static/style.css?v=20260527-upload-01">
 </head>
 <body>
   <header>
@@ -46,6 +46,32 @@
           <span class="label">最新</span>
         </button>
       </div>
+    </section>
+
+    <section id="upload-section">
+      <h2>📤 Upload (ファイル / フォルダ → CC CLI)</h2>
+      <div class="button-grid">
+        <button class="big-btn" data-action="upload_files_pick">
+          <span class="icon">📄</span>
+          <span class="label">ファイル<br><small>(複数可)</small></span>
+        </button>
+        <button class="big-btn" data-action="upload_folder_pick">
+          <span class="icon">📁</span>
+          <span class="label">フォルダ<br><small>(再帰、@dir で投入)</small></span>
+        </button>
+      </div>
+      <div id="upload-dropzone">
+        <div class="dropzone-text">
+          ここに drag &amp; drop<br>
+          <small>ファイル → @path1 @path2 ... / フォルダ → @dir</small>
+        </div>
+      </div>
+      <div id="upload-progress" class="hidden">
+        <div class="bar"><div class="fill"></div></div>
+        <div class="text">準備中...</div>
+      </div>
+      <input type="file" id="upload-file-input" class="hidden" multiple>
+      <input type="file" id="upload-folder-input" class="hidden" webkitdirectory>
     </section>
 
     <section id="window-select-section" class="hidden">
@@ -91,7 +117,7 @@
       </label>
       <label class="intent-row">
         <span>Intent:</span>
-        <input type="text" id="intent" value="このスクショを見て" placeholder="このスクショを見て">
+        <input type="text" id="intent" value="" placeholder="(空欄 OK、毎回違う指示はここに都度入力)">
       </label>
     </section>
 
@@ -105,6 +131,6 @@
     <div id="countdown-number">3</div>
   </div>
 
-  <script src="/static/app.js?v=20260525-26"></script>
+  <script src="/static/app.js?v=20260527-upload-01"></script>
 </body>
 </html>
