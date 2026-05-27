@@ -305,7 +305,10 @@ def cap_record_upload():
 
     multipart/form-data:
         video: <webm blob>
-        intent: <text> (default empty; empty intent omits the trailing space + intent suffix)
+        intent: <text> (default "Extract subtitles from these frames." — kept as
+                a non-empty default for record_upload only because subtitle
+                extraction is the primary use case for this endpoint;
+                screenshot/upload paths use empty default)
         auto_send: "0" / "1"
         auto_submit: "0" / "1"
         tab_id: WezTerm target tab id
@@ -314,7 +317,7 @@ def cap_record_upload():
     if "video" not in request.files:
         return jsonify({"error": "video file required"}), 400
     f = request.files["video"]
-    intent = (request.form.get("intent") or "").strip()
+    intent = (request.form.get("intent") or "Extract subtitles from these frames.").strip()
     auto_send = request.form.get("auto_send", "0") == "1"
     tab_id_raw = request.form.get("tab_id", "")
     tab_id = int(tab_id_raw) if tab_id_raw.isdigit() else None

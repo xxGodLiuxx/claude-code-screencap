@@ -23,6 +23,8 @@ Rationale: in practice each capture/upload has a different intent, so a sticky d
 
 Sites updated: `cap_browser_upload`, `cap_record_upload`, `cc_send`, `_auto_send_if_requested`, `_sendkeys_to_cc_cli`, the Intent input default in `index.html`, and all five `|| "default"` fallback sites in `app.js`.
 
+**Carve-out:** `cap_record_upload` keeps `"Extract subtitles from these frames."` as a non-empty default because subtitle extraction is the primary use case for the record endpoint — letting the empty default propagate there caused friction in practice. Screenshot and upload endpoints retain the empty default.
+
 ---
 
 ## v10 — WezTerm socket auto-resolve + drop auto-detect UI
