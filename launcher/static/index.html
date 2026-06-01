@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Claude Code Screencap</title>
-  <link rel="stylesheet" href="/static/style.css?v=20260527-upload-01">
+  <link rel="stylesheet" href="/static/style.css?v=20260601-layout-01">
 </head>
 <body>
   <header>
@@ -13,57 +13,76 @@
   </header>
 
   <main>
-    <section id="auth-section" class="auth">
-      <h2>🔐 Auth</h2>
+    <!-- (1) Top: WezTerm target + intent (input moved to the top, 2026-06-01 layout) -->
+    <section class="cc-control" id="send-target-section">
+      <h2>WezTerm 投入先 / 指示</h2>
+      <div class="control-row">
+        <label class="intent-row inline grow">
+          <span>Target Tab:</span>
+          <select id="cc-tab-select">
+            <option value="" disabled selected>-- Tab を選択 --</option>
+          </select>
+          <button class="small-btn" data-action="cc_tabs_refresh">⟳</button>
+        </label>
+        <label class="intent-row inline shrink">
+          <span>⏱ 遅延:</span>
+          <select id="capture-delay">
+            <option value="0">即時</option>
+            <option value="3">3 秒後</option>
+            <option value="5">5 秒後</option>
+            <option value="10">10 秒後</option>
+          </select>
+        </label>
+      </div>
       <label class="intent-row">
-        <span>Bearer Token:</span>
-        <input type="password" id="auth-token" placeholder="ここにトークンを貼り付け" autocomplete="off">
-        <button class="small-btn" id="auth-save">保存</button>
-        <button class="small-btn" id="auth-clear">クリア</button>
+        <span>Intent:</span>
+        <input type="text" id="intent" value="" placeholder="(空欄 OK、毎回違う指示はここに都度入力)">
       </label>
-      <div id="auth-hint" style="font-size:0.85em; opacity:0.7; margin-top:4px;">
-        初回のみ。token は browser の localStorage に保管、launcher host の keyring と同じ値を入力。
+      <div class="toggle-grid">
+        <label class="toggle-row big-toggle">
+          <input type="checkbox" id="auto-send" checked>
+          自動投入 (capture → 即送信)
+        </label>
+        <label class="toggle-row">
+          <input type="checkbox" id="auto-submit">
+          挿入後 Enter で即送信
+        </label>
       </div>
     </section>
 
+    <!-- (2) Capture + Upload merged into one grid (all capture visible without scrolling) -->
     <section class="capture-modes">
-      <h2>Capture mode</h2>
+      <h2>Capture / Upload</h2>
       <div class="button-grid">
         <button class="big-btn" data-action="browser_native">
           <span class="icon">🎯</span>
-          <span class="label">Picker<br><small>(タブ/窓/画面全体)</small></span>
+          <span class="label">Picker<br><small>タブ/窓/画面</small></span>
         </button>
         <button class="big-btn" id="record-btn" data-action="record_toggle">
           <span class="icon">🎬</span>
-          <span class="label">録画<br><small>(start/stop)</small></span>
+          <span class="label">録画<br><small>start/stop</small></span>
         </button>
         <button class="big-btn" data-action="active_window">
           <span class="icon">🪟</span>
-          <span class="label">Window<br><small>(PrintWindow)</small></span>
+          <span class="label">Window<br><small>PrintWindow</small></span>
         </button>
         <button class="big-btn" data-action="latest_show">
           <span class="icon">📋</span>
           <span class="label">最新</span>
         </button>
-      </div>
-    </section>
-
-    <section id="upload-section">
-      <h2>📤 Upload (ファイル / フォルダ → CC CLI)</h2>
-      <div class="button-grid">
         <button class="big-btn" data-action="upload_files_pick">
           <span class="icon">📄</span>
-          <span class="label">ファイル<br><small>(複数可)</small></span>
+          <span class="label">ファイル<br><small>複数可</small></span>
         </button>
         <button class="big-btn" data-action="upload_folder_pick">
           <span class="icon">📁</span>
-          <span class="label">フォルダ<br><small>(再帰、@dir で投入)</small></span>
+          <span class="label">フォルダ<br><small>@dir 投入</small></span>
         </button>
       </div>
       <div id="upload-dropzone">
         <div class="dropzone-text">
-          ここに drag &amp; drop<br>
-          <small>ファイル → @path1 @path2 ... / フォルダ → @dir</small>
+          ここに drag &amp; drop
+          <small>ファイル → @path1 @path2 … / フォルダ → @dir</small>
         </div>
       </div>
       <div id="upload-progress" class="hidden">
@@ -74,63 +93,45 @@
       <input type="file" id="upload-folder-input" class="hidden" webkitdirectory>
     </section>
 
+    <!-- Expandable: window picker (shown by active_window) -->
     <section id="window-select-section" class="hidden">
       <h2>Window 選択</h2>
       <button class="small-btn" data-action="windows_refresh">⟳ 一覧更新</button>
       <ul id="window-list" class="tab-list"></ul>
     </section>
 
+    <!-- Expandable: recent shots (shown by 最新) -->
     <section id="recent-section" class="hidden">
       <h2>Recent (最新 3 件)</h2>
       <div id="recent-list" class="thumb-grid"></div>
     </section>
 
-    <section class="timer-config">
-      <h2>⏱ Timer</h2>
-      <label class="intent-row">
-        <span>遅延撮影:</span>
-        <select id="capture-delay" style="flex:1; padding:6px;">
-          <option value="0">即時</option>
-          <option value="3">3 秒後</option>
-          <option value="5">5 秒後</option>
-          <option value="10">10 秒後</option>
-        </select>
-      </label>
-    </section>
-
-    <section class="cc-control">
-      <h2>CC CLI 連携</h2>
-      <label class="toggle-row big-toggle">
-        <input type="checkbox" id="auto-send" checked>
-        自動投入 (capture → 即 CC CLI に送信)
-      </label>
-      <label class="toggle-row">
-        <input type="checkbox" id="auto-submit">
-        挿入後 Enter で即送信 (off なら手動 Enter)
-      </label>
-      <label class="intent-row">
-        <span>Target Tab:</span>
-        <select id="cc-tab-select" style="flex:1; padding:6px;">
-          <option value="" disabled selected>-- Tab を選択 --</option>
-        </select>
-        <button class="small-btn" data-action="cc_tabs_refresh">⟳</button>
-      </label>
-      <label class="intent-row">
-        <span>Intent:</span>
-        <input type="text" id="intent" value="" placeholder="(空欄 OK、毎回違う指示はここに都度入力)">
-      </label>
-    </section>
-
+    <!-- Status: single compact line -->
     <section class="status">
-      <h2>Status</h2>
       <div id="last-status">最後のアクションなし</div>
     </section>
+
+    <!-- Auth: collapsed by default (token persists in localStorage; auto-opens when unset) -->
+    <details id="auth-details">
+      <summary>🔐 Auth (Bearer Token)</summary>
+      <section class="auth" id="auth-section">
+        <label class="intent-row">
+          <span>Token:</span>
+          <input type="password" id="auth-token" placeholder="ここにトークンを貼り付け" autocomplete="off">
+          <button class="small-btn" id="auth-save">保存</button>
+          <button class="small-btn" id="auth-clear">クリア</button>
+        </label>
+        <div id="auth-hint" style="font-size:0.85em; opacity:0.7; margin-top:4px;">
+          初回のみ。token は browser の localStorage に保管、launcher host の keyring と同じ値を入力。
+        </div>
+      </section>
+    </details>
   </main>
 
   <div id="countdown-overlay" class="hidden">
     <div id="countdown-number">3</div>
   </div>
 
-  <script src="/static/app.js?v=20260527-upload-01"></script>
+  <script src="/static/app.js?v=20260601-layout-01"></script>
 </body>
 </html>

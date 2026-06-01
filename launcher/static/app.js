@@ -1133,6 +1133,12 @@
         ui.authHint.textContent = `✅ token 保存済 (末尾 ...${getToken().slice(-4)})。変更時のみ入力 + 保存。`;
         ui.authHint.style.color = "var(--success, #4caf50)";
       }
+    } else {
+      // No token yet: auto-open the collapsed Auth panel (first-run setup path).
+      // When a token is already stored it stays collapsed so the capture
+      // controls fit on one screen.
+      const ad = document.getElementById("auth-details");
+      if (ad) ad.open = true;
     }
     console.log("[launcher] token restore done");
   } catch (e) {

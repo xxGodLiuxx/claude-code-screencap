@@ -1,5 +1,18 @@
 # Release Notes
 
+## v12 — Single-screen layout: input on top, merged Capture/Upload grid, collapsible Auth
+
+**Layout reorg so a capture needs no scrolling.**
+
+- The send controls (Target Tab, Intent, delay timer, auto-send / auto-submit toggles) now live in a single **WezTerm 投入先 / 指示** section at the very top — you set the target tab and intent first, then click a capture button right below.
+- Capture and Upload buttons are merged into one responsive grid (Picker / 録画 / Window / 最新 / ファイル / フォルダ) instead of two separate stacked sections.
+- The **Auth** section is now a collapsible `<details>` that stays closed once a token is stored (the token persists in `localStorage`), and auto-opens on first run when no token is present.
+- Tighter spacing throughout (body padding, section margins, headings, button height 110→92px — still within the 60px+ eye-tracker guidance). Collapsed page height is ~600px, with the input row + all capture buttons inside the first ~460px.
+
+No backend / API changes — `launcher.py` is untouched. Static assets are cache-busted via `?v=20260601-layout-01`, so a browser reload picks up the new UI without a launcher restart.
+
+---
+
 ## v11 — File / folder upload + empty default intent
 
 **New: `/api/upload/files` endpoint + 📤 Upload UI section**
