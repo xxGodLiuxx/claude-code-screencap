@@ -534,3 +534,30 @@ body.is-recording #record-btn {
   line-height: 1;
   font-variant-numeric: tabular-nums;
 }
+
+/* ====== Adaptive height: tighten vertical rhythm on short windows so the
+ * one-screen layout holds without scrolling. Tall / comfortable windows keep
+ * the default sizes above unchanged. Width already reflows via the auto-fill
+ * button grid and the flex-wrap control / toggle rows. ====== */
+@media (max-height: 700px) {
+  body { padding: 9px 14px; }
+  header { margin-bottom: 9px; padding-bottom: 7px; }
+  section { padding: 11px 14px; margin-bottom: 9px; }
+  h2 { margin-bottom: 7px; }
+  .intent-row { margin-top: 8px; }
+  .toggle-grid { margin-top: 4px; }
+  .big-btn { min-height: 78px; padding: 10px 8px; }
+  .big-btn .icon { font-size: 24px; }
+  #upload-dropzone { padding: 11px 12px; margin-top: 9px; }
+}
+
+@media (max-height: 560px) {
+  body { padding: 7px 12px; }
+  header { margin-bottom: 6px; padding-bottom: 5px; }
+  section { padding: 9px 12px; margin-bottom: 6px; }
+  .intent-row { margin-top: 6px; }
+  .big-btn { min-height: 62px; padding: 7px 6px; gap: 2px; }
+  .big-btn .icon { font-size: 20px; }
+  .big-btn .label small { display: none; }  /* hide sub-labels on very short windows */
+  #upload-dropzone { padding: 8px 10px; }
+}

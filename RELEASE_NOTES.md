@@ -1,5 +1,13 @@
 # Release Notes
 
+## v13 — Adaptive height (keep the one-screen fit on shorter windows)
+
+The v12 layout fit one screen at a comfortable window size, but nothing shrank the vertical rhythm once the window got short — a low window could scroll. v13 adds two `@media (max-height: …)` steps (700px and 560px) that progressively tighten body / section / header spacing, button height and icon size, and hide the button sub-labels on very short windows. Tall / comfortable windows are pixel-identical to v12. Width was already fluid: the capture/upload grid uses `auto-fill minmax(120px, 1fr)` and the control / toggle rows use `flex-wrap`.
+
+CSS-only — `launcher.py` and `app.js` are untouched. Cache-busted via `?v=20260601-layout-02`.
+
+---
+
 ## v12 — Single-screen layout: input on top, merged Capture/Upload grid, collapsible Auth
 
 **Layout reorg so a capture needs no scrolling.**
